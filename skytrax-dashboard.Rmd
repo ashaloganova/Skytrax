@@ -1,0 +1,128 @@
+---
+title: "Исследование отзывов пользователей Skytrax"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(dplyr)
+library(ggplot2)
+
+source("~/shared/minor2_2022/1-Intro/hw1/hw1_data.R")
+
+airline = hw1_get_data(df_name = "airline")
+airport = hw1_get_data(df_name = "airport")
+lounge = hw1_get_data(df_name = "lounge")
+seat = hw1_get_data(df_name = "seat")
+# загрузка данных, предобработка 
+```
+
+Row {data-width=550}
+-----------------------------------------------------------------------
+###лаунж-зон оценены по чистоте выше, чем аэропорты, в которых они находятся
+
+```{r}
+valueBox("41%")
+```
+
+###самолетов с 2 проходами
+
+```{r}
+plane_passages = select(seat,seat_layout, aircraft)
+
+plane_passages$seat_layout = str_replace_all(plane_passages$seat_layout,"3X3", "3x3")
+plane_passages$seat_layout = str_replace_all(plane_passages$seat_layout,"3-3","3x3")
+plane_passages = plane_passages[-c(35), ]
+plane_passages = mutate(plane_passages, number_of_passages = str_count(seat_layout,"x"))
+plane_passages = unique(plane_passages)
+N = nrow(plane_passages)
+
+plane_passages = plane_passages %>% 
+  filter (number_of_passages == 2)
+n = nrow(plane_passages)
+
+valueBox(str_c(round(n*100/N,0),"%", collapse = ""), icon = 'fa-plane')
+```
+
+Row {data-width=550}
+-----------------------------------------------------------------------
+###Лаунж-зоны, которые оценены по чистоте (cleanliness) выше, чем аэропорты, в которых они расположены
+
+```{r}
+a_clean= select(airport, airport_name, terminal_cleanliness_rating)
+a_clean$airport_name = str_replace_all(a_clean$airport_name,"-", " ")
+a_clean$airport_name = str_to_title(a_clean$airport_name)
+a_clean = rename(a_clean, airport = airport_name)
+a_clean = a_clean %>% 
+  filter (!is.na(terminal_cleanliness_rating)) 
+a_clean = a_clean %>% 
+  filter (!is.na(airport))
+
+l_clean= select(lounge, airport, title, cleanliness_rating)
+l_clean$airport = str_replace_all(l_clean$airport,"-", " ")
+l_clean$airport = str_to_title(l_clean$airport)
+l_clean = l_clean %>% 
+  filter (!is.na(cleanliness_rating)) 
+l_clean = l_clean %>% 
+  filter (!is.na(airport))
+l_clean = rename(l_clean, lounge_cleanliness_rating = cleanliness_rating)
+l_clean$title = str_to_title(l_clean$title)
+
+a_clean = group_by(a_clean, airport)
+a_clean = dplyr::summarise(a_clean, a_mean_clean_rating = round(mean(terminal_cleanliness_rating), 2))
+
+l_clean = group_by(l_clean, airport, title)
+l_clean = dplyr::summarise(l_clean, l_mean_clean_rating = round(mean(lounge_cleanliness_rating), 2))
+
+la_clean = left_join(l_clean, a_clean, by="airport")
+la_clean = unique(la_clean)
+la_clean = la_clean %>% 
+  mutate(a = l_mean_clean_rating > a_mean_clean_rating)
+la_clean = la_clean %>% 
+  filter(a == 1)
+
+la_clean = arrange(la_clean, -l_mean_clean_rating)
+la_clean = arrange(la_clean, -a_mean_clean_rating)
+
+#мне кажется, что 2 и 4 строка про один лаунж, просто Silverkris написали по-разному, поэтому я удалю 4 строку
+la_clean = la_clean[-c(4), ]
+
+top15clean = head (la_clean, 15)
+
+ggplot()+
+  geom_bar(data = top15clean, aes(x = title, y = l_mean_clean_rating), stat = "identity", fill = "#323C69", width = 0.4) +
+  xlab("Название лаунж-зоны") +
+  ylab ("Средняя оценка чистоты \nлаунж-зон\nот 1 до 5") +
+#  ggtitle("Какие лаунж-зоны оценены по чистоте выше, \nчем аэропорты, в которых они расположены?") +
+  theme_bw() +
+  theme (axis.text.y = element_text(size = 6)) +
+  coord_flip()
+```
+
+###Зависимость удобства пространства для ног от количества проходов в салоне
+
+```{r}
+legroom_rating = select(seat,seat_layout,seat_legroom_rating)
+legroom_rating$seat_layout = str_replace_all(legroom_rating$seat_layout,"3X3", "3x3")
+legroom_rating$seat_layout = str_replace_all(legroom_rating$seat_layout,"3-3","3x3")
+legroom_rating = legroom_rating[-c(35), ]
+legroom_rating = mutate(legroom_rating, number_of_passages = str_count(seat_layout,"x"))
+
+legroom_rating = group_by(legroom_rating, number_of_passages)
+legroom_rating = dplyr::summarise(legroom_rating, mean_legroom_rating = round(mean(seat_legroom_rating),1))
+
+#построение графика
+ggplot() +
+  geom_bar(data = legroom_rating, aes(x = format (number_of_passages), y = mean_legroom_rating), stat = "identity", fill = "#D2D2D2", width = 0.2) +
+  xlab("Количество проходов в салоне") +
+  ylab ("Средняя оценка пространства для ног") +
+#  ggtitle("Зависимость удобства пространства для ног от количества проходов в салоне") +
+  theme_bw() +
+    geom_bar(top_n(legroom_rating, mean_legroom_rating, n=1), mapping = aes(x = format (number_of_passages), y = mean_legroom_rating), stat = "identity", fill = "#323C69", width = 0.2) +
+  geom_label (data = legroom_rating, aes(x = format (number_of_passages), y = mean_legroom_rating, label = mean_legroom_rating))
+
+```
+
